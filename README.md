@@ -6,7 +6,7 @@ RUSS is a simulator for Ultrasound Sweeps using 3D Ultrasound Data. It is curren
 
 RUSS has two main interfaces. One, is a single HTML file that can be opened in any browser. This allows for manual control through the 3D Ultrasound Sweep.
 
-<img src="https://files.mcaq.me/489x4.gif" width="800" />
+<img src="docs/web.gif" width="800" />
 
 ### Controls
 
@@ -31,4 +31,4 @@ frame_parameters = slicer.create_synthetic_video(
     "synthetic_video.mp4",
 )
 ```
-<img src="https://files.mcaq.me/104k1.gif" width="500" />
+<img src="docs/video.gif" width="500" />
