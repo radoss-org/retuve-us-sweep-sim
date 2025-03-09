@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>Volume Slicer for NPZ Volume</title>
+    <!-- Load PyScript (make sure to use a recent release) -->
+    <script type="module" src="https://pyscript.net/releases/2023.12.1/core.js"></script>
+    <py-config style="display:none">
+        packages = ["pillow", "numpy"]
+    </py-config>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            /* Remove default body margin */
+            background-color: #f4f4f4;
+            /* Light background */
+            color: #333;
+            /* Darker text for readability */
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            /* Add padding around content */
+        }
+
+        h1 {
+            margin-bottom: 0.5rem;
+            color: #555;
+            /* Slightly darker heading */
+        }
+
+        #controls {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #fff;
+            /* White background for controls */
+            border-radius: 8px;
+            max-width: 600px;
+            /* Increased max-width */
+            width: 100%;
+            /* Take full width of parent */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            /* Subtle shadow for depth */
+            display: flex;
+            /* Use flexbox for layout */
+            flex-wrap: wrap;
+            /* Allow items to wrap */
+            justify-content: space-around;
+            /* Distribute space evenly */
+        }
+
+        #controls div {
+            margin: 0.5rem;
+            /* Add spacing between control groups */
+            display: flex;
+            /* Align label and input */
+            flex-direction: column;
+            /* Stack label and input vertically */
+            align-items: center;
+            /* Center items horizontally */
+        }
+
+        #controls label {
+            display: block;
+            /* Ensure label takes full width */
+            width: auto;
+            /* Adjust width to content */
+            margin-bottom: 0.25rem;
+            /* Space between label and input */
+            color: #777;
+            /* Muted label color */
+            text-align: center;
+            /* Center the label text */
+        }
+
+        #controls input[type="range"] {
+            width: 100%;
+            /* Make range input fill its container */
+            max-width: 200px;
+            /* Limit the maximum width */
+        }
+
+        #output img {
+            margin-top: 1rem;
+            max-width: 80%;
+            /* Slightly reduced max-width */
+            height: auto;
+            min-height: 700px;
+            min-width: 700px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            /* Rounded corners for images */
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            /* Subtle shadow */
+        }
+
+        #container {
+            width: 400px;
+            height: 400px;
+            cursor: grab;
+            border: 1px solid #aaa;
+            /* Lighter border */
+            border-radius: 8px;
+            /* Rounded corners */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            /* Subtle shadow */
+            margin-top: 1rem;
+            /* Add some space above */
+        }
+
+        #container.dragging {
+            cursor: grabbing;
+        }
+
+        #flexer {
+            display: flex;
+            justify-content: space-evenly;
+            width: 100%;
+            margin-top: 1rem;
+            flex-direction: row;
+        }
+
+        #info {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            color: white;
+            font-family: sans-serif;
+            z-index: 100;
+            background-color: rgba(0, 0, 0, 0.7);
+            /* Semi-transparent background */
+            padding: 5px;
+            /* Add padding */
+            border-radius: 4px;
+            /* Rounded corners */
+        }
+
+        #file-upload-container {
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        #file-upload {
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Volume Slicer</h1>
+        <div id="file-upload-container">
+            <label for="file-upload">Choose NPZ File:</label>
+            <input type="file" id="file-upload" accept=".npz" />
+        </div>
+
+        <div id="controls">
+            <div>
+                <label for="z-slider">Z Position:</label>
+                <input type="range" id="z-slider" min="0" max="1" value="0" step="1" />
+                <span id="z-value">0</span>
+            </div>
+            <div>
+                <label for="x-slider">X Position:</label>
+                <input type="range" id="x-slider" min="0" max="1" value="0" step="1" />
+                <span id="x-value">0</span>
+            </div>
+            <div>
+                <label for="y-slider">Y Position:</label>
+                <input type="range" id="y-slider" min="0" max="1" value="0" step="1" />
+                <span id="y-value">0</span>
+            </div>
+            <div>
+                <label for="angle-x-slider">Angle X:</label>
+                <input type="range" id="angle-x-slider" min="-90" max="90" value="0" step="1" />
+                <span id="angle-x-value">0°</span>
+            </div>
+            <div>
+                <label for="angle-y-slider">Angle Y:</label>
+                <input type="range" id="angle-y-slider" min="-90" max="90" value="0" step="1" />
+                <span id="angle-y-value">0°</span>
+            </div>
+        </div>
+
+        <div id="flexer">
+            <div id="output"></div>
+            <div id="container"></div>
+        </div>
+
+        <div id="info"></div>
+    </div>
+    <script type="importmap">
+    {
+        "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="py">
+    from js import document
+    from pyodide.ffi.wrappers import add_event_listener
+    import numpy as np
+    from PIL import Image
+    from io import BytesIO
+    import base64
+    import math
+    from js import window
+    # Global variable to store the loaded volume.
+    volume = None
+    volume_dims = None
+
+
+    def extract_slice():
+      """
+      Extract a 2D slice from the 3D volume using the current slider values.
+      The volume is assumed to be a 4D array with shape
+      (nZ, nY, nX, channels) where the coordinates correspond to (x, y, z)
+      with volume indices accessed as volume[z, y, x].
+      """
+      global volume, volume_dims
+      if volume is None:
+        return
+
+      # Get slider values.
+      z_pos = int(document.getElementById("z-slider").value)
+      x_pos = int(document.getElementById("x-slider").value)
+      y_pos = int(document.getElementById("y-slider").value)
+      angle_x = float(document.getElementById("angle-x-slider").value)
+      angle_y = float(document.getElementById("angle-y-slider").value)
+
+      # Convert angles to radians.
+      ax = math.radians(angle_x)
+      ay = math.radians(angle_y)
+
+      # Compute rotation matrices for x and y.
+      Rx = np.array([
+          [1, 0, 0],
+          [0, math.cos(ax), -math.sin(ax)],
+          [0, math.sin(ax), math.cos(ax)],
+      ])
+      Ry = np.array([
+          [math.cos(ay), 0, math.sin(ay)],
+          [0, 1, 0],
+          [-math.sin(ay), 0, math.cos(ay)],
+      ])
+      # Compose rotations (first rotate about X, then Y).
+      R = Ry.dot(Rx)
+
+      # Determine the slicing plane.
+      # The default slice has normal (0, 0, 1) with in-plane axes (1, 0, 0) and (0, 1, 0).
+      normal = R.dot(np.array([0, 0, 1]))
+      u_axis = R.dot(np.array([1, 0, 0]))
+      v_axis = R.dot(np.array([0, 1, 0]))
+
+      # Interpret volume shape. Our volume has shape (nZ, nY, nX, channels).
+      nZ, nY, nX = volume.shape[:3]
+      channels = 1
+      if volume.ndim == 4:
+        channels = volume.shape[3]
+
+      # Define the center of the volume in (x, y, z) coordinates.
+      center = np.array([(nX - 1) / 2.0, (nY - 1) / 2.0, (nZ - 1) / 2.0])
+
+      # Set output slice parameters.
+      out_size = 256  # Resolution of the output slice (256 x 256)
+      L = max(nX, nY, nZ)
+      # Create a grid in plane coordinates (u, v)
+      u = np.linspace(-L/2, L/2, out_size)
+      v = np.linspace(-L/2, L/2, out_size)
+      U, V = np.meshgrid(u, v, indexing="xy")  # each of shape (out_size, out_size)
+
+      # For each output pixel compute the corresponding (x, y, z) in volume:
+      # p = center + (slice_offset * normal) + (u * u_axis) + (v * v_axis)
+      # The problem was that the x_pos and y_pos were not being used to offset the center.
+      P = (
+          np.array([x_pos - center[0], y_pos - center[1], z_pos - center[2]]).reshape(1, 1, 3)
+          + center.reshape(1, 1, 3)
+          + U[..., np.newaxis] * u_axis.reshape(1, 1, 3)
+          + V[..., np.newaxis] * v_axis.reshape(1, 1, 3)
+      )
+      # P has shape (out_size, out_size, 3) with (x, y, z) coordinates.
+      X = P[..., 0]
+      Y = P[..., 1]
+      Z = P[..., 2]
+
+      # Convert to volume indices; volume indices are accessed as volume[z, y, x].
+      x_idx = np.rint(X).astype(np.int32)
+      y_idx = np.rint(Y).astype(np.int32)
+      z_idx = np.rint(Z).astype(np.int32)
+
+      # Clip indices so they lie within the volume bounds.
+      x_idx = np.clip(x_idx, 0, nX - 1)
+      y_idx = np.clip(y_idx, 0, nY - 1)
+      z_idx = np.clip(z_idx, 0, nZ - 1)
+
+      # Sample the volume using nearest-neighbor interpolation.
+      if channels == 1:
+        slice_img = volume[z_idx, y_idx, x_idx]
+      else:
+        slice_img = volume[z_idx, y_idx, x_idx, :]
+
+      # Normalize to uint8 if needed.
+      if slice_img.dtype != np.uint8:
+        m = slice_img.min()
+        M = slice_img.max()
+        if M > m:
+          slice_img = (255 * (slice_img - m) / (M - m)).astype(np.uint8)
+        else:
+          slice_img = slice_img.astype(np.uint8)
+
+      # Convert the numpy slice to a Pillow image.
+      if channels == 1:
+        pil_im = Image.fromarray(slice_img, mode="L")
+      elif channels == 3:
+        pil_im = Image.fromarray(slice_img, mode="RGB")
+      elif channels == 4:
+        pil_im = Image.fromarray(slice_img, mode="RGBA")
+      else:
+        pil_im = Image.fromarray(slice_img.astype(np.uint8))
+
+      # Convert the Pillow image to a PNG data URL.
+      buffer = BytesIO()
+      pil_im.save(buffer, format="PNG")
+      encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+      data_url = f"data:image/png;base64,{encoded}"
+
+      # Update the output area with the new image.
+      output_div = document.getElementById("output")
+      output_div.innerHTML = ""
+      img_elem = document.createElement("img")
+      img_elem.src = data_url
+      output_div.appendChild(img_elem)
+
+      # Update slider display values.
+      document.getElementById("z-value").innerText = f"{z_pos}"
+      document.getElementById("x-value").innerText = f"{x_pos}"
+      document.getElementById("y-value").innerText = f"{y_pos}"
+      document.getElementById("angle-x-value").innerText = f"{angle_x:.1f}°"
+      document.getElementById("angle-y-value").innerText = f"{angle_y:.1f}°"
+
+
+    async def on_file_upload(e):
+      """
+      When an NPZ file is uploaded, load it (using np.load) and store the first
+      array found (assumed to be a 4D volume) into a global variable. Also,
+      update the slice slider limits based on the volume dimensions.
+      """
+      file_list = e.target.files
+      if file_list.length == 0:
+        return
+      first_item = file_list.item(0)
+      bytes_data = await get_bytes_from_file(first_item)
+      npz_file = np.load(BytesIO(bytes_data))
+      keys = list(npz_file.files)
+      if len(keys) == 0:
+        print("No arrays found in the NPZ file.")
+        return
+      global volume, volume_dims
+      volume = npz_file[keys[0]]
+      if volume.ndim != 4 and volume.ndim != 3:
+        print("Expected a 4D array (num_images, H, W, C) or 3D array (H, W, C). Got shape:",
+              volume.shape)
+        return
+
+      if volume.ndim == 4:
+        nZ, nY, nX = volume.shape[:3]
+      else:
+        nY, nX, nZ = volume.shape
+        volume = volume.reshape(nY, nX, nZ)
+
+      volume_dims = (nZ, nY, nX)
+
+      # save volume information to window
+      window.volume_dims = volume_dims
+
+      # Update the slice slider limits.
+      z_slider = document.getElementById("z-slider")
+      z_slider.min = 0
+      z_slider.max = nZ - 1
+      z_slider.value = nZ // 2
+
+      x_slider = document.getElementById("x-slider")
+      x_slider.min = 0
+      x_slider.max = nX - 1
+      x_slider.value = nX // 2
+
+      y_slider = document.getElementById("y-slider")
+      y_slider.min = 0
+      y_slider.max = nY - 1
+      y_slider.value = nY // 2
+
+      extract_slice()
+
+
+    async def get_bytes_from_file(file):
+      array_buf = await file.arrayBuffer()
+      return array_buf.to_bytes()
+
+
+    # Attach event listeners.
+    add_event_listener(
+        document.getElementById("file-upload"), "change", on_file_upload
+    )
+    add_event_listener(
+        document.getElementById("z-slider"), "input", lambda e: extract_slice()
+    )
+    add_event_listener(
+        document.getElementById("x-slider"), "input", lambda e: extract_slice()
+    )
+    add_event_listener(
+        document.getElementById("y-slider"), "input", lambda e: extract_slice()
+    )
+    add_event_listener(
+        document.getElementById("angle-x-slider"), "input", lambda e: extract_slice()
+    )
+    add_event_listener(
+        document.getElementById("angle-y-slider"), "input", lambda e: extract_slice()
+    )
+
+    window.extract_slice = extract_slice
+  </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import {
+            OrbitControls
+        } from 'three/addons/controls/OrbitControls.js';
+
+        // Initialize Three.js scene, camera, and renderer
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(
+            75,
+            1, // Fixed aspect ratio for 300x300 window
+            0.1,
+            1000
+        );
+        camera.position.z = 15; // Set up camera position
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(400, 400); // Fixed size
+        document.getElementById('container').appendChild(renderer.domElement);
+
+        // Create a sphere (balloon)
+        const sphereGeometry = new THREE.SphereGeometry(5, 32, 32);
+        const sphereMaterial = new THREE.MeshBasicMaterial({
+            color: 0xff0000,
+        }); // Red
+        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+        scene.add(sphere);
+
+        // Create a rectangular prism (hand)
+        const prismGeometry = new THREE.BoxGeometry(2, 1, 6);
+        const prismMaterial = new THREE.MeshBasicMaterial({
+            color: 0x0000ff
+        }); // Blue
+        const prism = new THREE.Mesh(prismGeometry, prismMaterial);
+        scene.add(prism);
+
+        // Radius of the sphere (and distance of the prism)
+        const radius = 7;
+
+        // Initial angles (in radians)
+        const initialTheta = Math.PI / 2; // 90 degrees
+        const initialPhi = Math.PI / 2; // 90 degrees
+
+        // Set initial position
+        const initialX = radius * Math.sin(initialPhi) * Math.cos(initialTheta);
+        const initialY = radius * Math.cos(initialPhi);
+        const initialZ = radius * Math.sin(initialPhi) * Math.sin(initialTheta);
+
+        prism.position.set(initialX, initialY, initialZ);
+        prism.lookAt(sphere.position);
+
+        // Mouse position and dragging variables
+        let isDragging = false;
+        let previousMouseX = 0;
+        let previousMouseY = 0;
+
+        const container = document.getElementById('container');
+        const infoDiv = document.getElementById('info');
+
+        container.addEventListener('mousedown', (event) => {
+            isDragging = true;
+            container.classList.add('dragging');
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+            container.focus(); // Add this line
+        });
+
+        document.addEventListener('mouseup', () => {
+            isDragging = false;
+            container.classList.remove('dragging');
+        });
+
+        document.addEventListener('mousemove', (event) => {
+            if (!isDragging) return;
+
+            const deltaX = event.clientX - previousMouseX;
+            const deltaY = event.clientY - previousMouseY;
+
+            // Convert deltas to spherical coordinate changes
+            const sensitivity = 0.01; // Adjust as needed
+            let thetaChange = -deltaX * sensitivity; // REVERSED X DIRECTION
+            let phiChange = deltaY * sensitivity;
+
+            // Get current spherical coordinates
+            let currentX = prism.position.x;
+            let currentY = prism.position.y;
+            let currentZ = prism.position.z;
+
+            let currentTheta = Math.atan2(currentZ, currentX);
+            let currentPhi = Math.acos(currentY / radius);
+
+            // Apply the changes
+            let newTheta = currentTheta + thetaChange;
+            let newPhi = currentPhi + phiChange;
+
+            // Clamp the angles to be within 90 degrees of the origin
+            const maxRotation = Math.PI / 2; // 90 degrees in radians
+            newTheta = Math.max(
+                initialTheta - maxRotation,
+                Math.min(initialTheta + maxRotation, newTheta)
+            );
+            newPhi = Math.max(
+                initialPhi - maxRotation,
+                Math.min(initialPhi + maxRotation, newPhi)
+            );
+
+            // Convert back to Cartesian coordinates, enforcing the fixed radius
+            const x = radius * Math.sin(newPhi) * Math.cos(newTheta);
+            const y = radius * Math.cos(newPhi);
+            const z = radius * Math.sin(newPhi) * Math.sin(newTheta);
+
+            prism.position.x = x;
+            prism.position.y = y;
+            prism.position.z = z;
+
+            previousMouseX = event.clientX;
+            previousMouseY = event.clientY;
+        });
+
+        const keys = {
+            w: false,
+            a: false,
+            s: false,
+            d: false
+        };
+
+        // Keep track of the prism's total Z rotation
+        let totalRotationAngle = 0;
+
+        // Key press event listener
+        document.addEventListener('keydown', (event) => {
+            // Update key state
+            if (event.key === 'w') keys.w = true;
+            if (event.key === 'a') keys.a = true;
+            if (event.key === 's') keys.s = true;
+            if (event.key === 'd') keys.d = true;
+        });
+
+        document.addEventListener('keyup', (event) => {
+            // Update key state
+            if (event.key === 'w') keys.w = false;
+            if (event.key === 'a') keys.a = false;
+            if (event.key === 's') keys.s = false;
+            if (event.key === 'd') keys.d = false;
+        });
+
+
+        function updatePrismOrientation(rotationAngle) {
+            // Create a quaternion representing the rotation around the prism's local Z-axis
+            const rotationQuaternion = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rotationAngle);
+
+            // Apply the rotation to the prism's quaternion
+            prism.quaternion.multiply(rotationQuaternion);
+        }
+
+        // Radians to degrees conversion function
+        function radToDegrees(radians) {
+            return radians * (180 / Math.PI);
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // Update info
+            const x = prism.position.x.toFixed(2);
+            const y = prism.position.y.toFixed(2);
+            const z = prism.position.z.toFixed(2);
+
+            let theta = Math.atan2(prism.position.z, prism.position.x);
+            let phi = Math.acos(prism.position.y / radius);
+
+            theta = radToDegrees(theta).toFixed(2);
+            phi = radToDegrees(phi).toFixed(2);
+
+            const rotationDegrees = radToDegrees(totalRotationAngle).toFixed(2);
+
+            infoDiv.innerHTML = `Position: (${x}, ${y}, ${z})<br>Angle: (Theta: ${theta}, Phi: ${phi})<br>Z Rotation: ${rotationDegrees}`;
+
+            // Process all active keys
+            const rotationSpeed = 0.05;
+
+            // Handle rotation (a and d keys)
+            if (keys.a) {
+                updatePrismOrientation(rotationSpeed);
+                totalRotationAngle += rotationSpeed;
+            }
+            if (keys.d) {
+                updatePrismOrientation(-rotationSpeed);
+                totalRotationAngle -= rotationSpeed;
+            }
+
+            // Get the z position max
+            var max_z_halved = window.volume_dims[0] / 2;
+            document.getElementById("z-slider").value = max_z_halved + parseInt(phi - 90) * 3;
+            document.getElementById("z-value").innerText = max_z_halved + parseInt(phi - 90) * 3;
+
+            // have rotation degrees control angle X
+            document.getElementById("angle-y-slider").value = parseInt(rotationDegrees);
+            document.getElementById("angle-y-value").innerText = parseInt(rotationDegrees);
+
+            // theta controls position x
+            var max_x_halved = window.volume_dims[2] / 2;
+            document.getElementById("x-slider").value = max_x_halved + parseInt(theta - 90) * 5;
+            document.getElementById("x-value").innerText = max_x_halved + parseInt(theta - 90) * 5;
+
+            // Handle Y position
+            var max_y_halved = window.volume_dims[1] / 2;
+            var currentY = parseInt(document.getElementById("y-slider").value);
+            var baseY = max_y_halved; // This is your "original" y position
+
+            if (keys.w) {
+                // Move up with acceleration (faster the longer you hold)
+                var upSpeed = 10;
+                var newY = Math.min(currentY + upSpeed, max_y_halved + 60); // Cap at max_y_halved + 60
+                document.getElementById("y-slider").value = newY;
+                document.getElementById("y-value").innerText = newY;
+            } else if (keys.s) {
+                // Move down
+                var downSpeed = 10;
+                var newY = Math.max(currentY - downSpeed, max_y_halved - 60);
+                document.getElementById("y-slider").value = newY;
+                document.getElementById("y-value").innerText = newY;
+            }
+            // } else {
+            //     // Return to original position gradually
+            //     var returnSpeed = 2;
+            //     if (currentY > (baseY - 60)) {
+            //         var newY = Math.max(currentY - returnSpeed, baseY - 60);
+            //         document.getElementById("y-slider").value = newY;
+            //         document.getElementById("y-value").innerText = newY;
+            //     } else if (currentY < baseY) {
+            //         var newY = Math.min(currentY + returnSpeed, baseY);
+            //         document.getElementById("y-slider").value = newY;
+            //         document.getElementById("y-value").innerText = newY;
+            //     }
+            // }
+
+            window.extract_slice();
+            renderer.render(scene, camera);
+        }
+
+
+        function waitForPyscriptReady() {
+            if (typeof window.extract_slice === "function") {
+                // PyScript is ready, so start the animation loop.
+                animate();
+            } else {
+                // Try again on the next animation frame.
+                requestAnimationFrame(waitForPyscriptReady);
+            }
+        }
+
+        window.volume_dims = [0, 0, 0];
+
+        // Begin checking for PyScript readiness.
+        waitForPyscriptReady();
+    </script>
+</body>
+
+</html>
