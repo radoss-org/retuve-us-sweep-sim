@@ -32,3 +32,8 @@ frame_parameters = slicer.create_synthetic_video(
 )
 ```
 <img src="docs/video.gif" width="500" />
+
+## Dev
+```bash
+& "C:\Users\adamm\AppData\Local\Programs\Python\Python313\Scripts\pyinstaller.exe" --onefile --windowed --name="dicom_convert.exe" --exclude-module matplotlib --exclude-module pandas --exclude-module retuve tools/simplify.py
+```

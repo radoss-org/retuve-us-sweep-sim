@@ -1,3 +1,6 @@
 moviepy
 pillow
-numpy
+PySide6
+pyinstaller
+
+git+https://github.com/radoss-org/radstract.git

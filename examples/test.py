@@ -42,7 +42,7 @@ position_limits = {
 
 rotation_limits = {
     "x": (0, 0),  # Clamp x-axis rotation between -20 and 20 degrees
-    "y": (-15, 15),  # Clamp y-axis rotation between -10 and 10 degrees
+    "y": (-30, 30),  # Clamp y-axis rotation between -10 and 10 degrees
 }
 
 # Create a synthetic video

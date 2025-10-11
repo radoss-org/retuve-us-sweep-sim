@@ -1,18 +1,32 @@
 import math
 
 import numpy as np
-from moviepy.editor import ImageSequenceClip
+from moviepy import ImageSequenceClip
 from PIL import Image
 
 
 class VolumeSlicer:
-    def __init__(self, npz_file_path):
+    def __init__(self, npz_file_path=None, np_data=None):
         """
         Initializes the VolumeSlicer with the path to an NPZ file.
         """
         self.volume = None
         self.volume_dims = None
-        self.load_volume(npz_file_path)
+
+        if (
+            np_data is not None
+            and np_data.size > 0
+            and npz_file_path is not None
+        ) or (np_data is None and npz_file_path is None):
+            raise ValueError(
+                "Either np_data or npz_file_path must be provided, but not both."
+            )
+
+        if np_data is not None:
+            self.volume = np_data
+            self.volume_dims = self.volume.shape[:3]
+        if npz_file_path is not None:
+            self.load_volume(npz_file_path)
 
     def load_volume(self, npz_file_path):
         """
@@ -321,7 +335,7 @@ class VolumeSlicer:
                 )
             )
 
-            RESTRICT = 0.1
+            RESTRICT = 0.15
             if restrict_rotation_near_z_limits:
                 # Scale rotation limits based on z position
                 z_range = position_limits["z"][1] - position_limits["z"][0]
