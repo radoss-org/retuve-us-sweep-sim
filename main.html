@@ -159,10 +159,38 @@
             margin: 10px 0;
             display: none;
         }
+
+        /* New styles for download button */
+        .download-button {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            text-decoration: none;
+            border-radius: 4px;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            transition: background-color 0.3s;
+            z-index: 100;
+        }
+
+        .download-button:hover {
+            background-color: #45a049;
+        }
     </style>
 </head>
 
 <body>
+    <!-- Add download button in top-left corner -->
+    <a href="https://github.com/radoss-org/retuve-us-sweep-sim/raw/refs/heads/main/dist/dicom_convert.exe"
+       class="download-button"
+       download="dicom_convert.exe">
+        Download DICOM Convert Software
+    </a>
+
     <div class="container">
         <h1>Volume Slicer</h1>
         <div id="file-upload-container">
