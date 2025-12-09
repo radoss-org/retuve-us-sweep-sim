@@ -1,11 +1,12 @@
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8" />
-    <title>Volume Slicer for NP, NPZ, and DICOM Files</title>
+    <title>Volume Slicer for NP, NPZ, NRRD, and DICOM Files</title>
     <!-- Load PyScript (make sure to use a recent release) -->
     <py-config style="display:none">
-        packages = ["pillow", "numpy", "pydicom"]
+        packages = ["pillow", "numpy", "pydicom", "pynrrd", "scipy"]
     </py-config>
     <script type="module" src="https://pyscript.net/releases/2025.8.1/core.js"></script>
     <style>
@@ -78,6 +79,57 @@
         }
 
         #controls input[type="range"] {
+            width: 100%;
+            /* Make range input fill its container */
+            max-width: 200px;
+            /* Limit the maximum width */
+        }
+
+        #sensitivity-controls {
+            margin: 1rem 0;
+            padding: 1rem;
+            background: #fff;
+            /* White background for controls */
+            border-radius: 8px;
+            max-width: 600px;
+            /* Increased max-width */
+            width: 100%;
+            /* Take full width of parent */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            /* Subtle shadow for depth */
+            display: flex;
+            /* Use flexbox for layout */
+            flex-wrap: wrap;
+            /* Allow items to wrap */
+            justify-content: space-around;
+            /* Distribute space evenly */
+        }
+
+        #sensitivity-controls div {
+            margin: 0.5rem;
+            /* Add spacing between control groups */
+            display: flex;
+            /* Align label and input */
+            flex-direction: column;
+            /* Stack label and input vertically */
+            align-items: center;
+            /* Center items horizontally */
+        }
+
+        #sensitivity-controls label {
+            display: block;
+            /* Ensure label takes full width */
+            width: auto;
+            /* Adjust width to content */
+            margin-bottom: 0.25rem;
+            /* Space between label and input */
+            color: #777;
+            /* Muted label color */
+            text-align: center;
+            /* Center the label text */
+        }
+
+        #sensitivity-controls input[type="range"] {
             width: 100%;
             /* Make range input fill its container */
             max-width: 200px;
@@ -194,12 +246,20 @@
     <div class="container">
         <h1>Volume Slicer</h1>
         <div id="file-upload-container">
-            <label for="file-upload">Choose File (NP, NPZ, or DICOM):</label>
-            <input type="file" id="file-upload" accept=".npz,.npy,.dcm" multiple />
+            <label for="file-upload">Choose File (NP, NPZ, NRRD, or DICOM):</label>
+            <input type="file" id="file-upload" accept=".npz,.npy,.dcm,.nrrd" multiple />
         </div>
 
         <div id="loading" class="loading-indicator">Loading file(s)...</div>
         <div id="error" class="error-message"></div>
+
+        <div id="sensitivity-controls">
+            <div>
+                <label for="global-sensitivity">Global Sensitivity:</label>
+                <input type="range" id="global-sensitivity" min="0.01" max="3" value="1" step="0.01" />
+                <span id="global-sensitivity-value">1.00x</span>
+            </div>
+        </div>
 
         <div id="controls">
             <div>
@@ -255,12 +315,15 @@
     import math
     from js import window
     import pydicom
+    import nrrd
     from pyodide.http import pyfetch
+    import tempfile
+    import os
 
     # Global variable to store the loaded volume.
     volume = None
     volume_dims = None
-    file_type = None  # To track if we loaded NPZ, NPY, or DICOM
+    file_type = None  # To track if we loaded NPZ, NPY, NRRD, or DICOM
 
     def extract_slice():
       """
@@ -347,16 +410,25 @@
       y_idx = np.rint(Y).astype(np.int32)
       z_idx = np.rint(Z).astype(np.int32)
 
-      # Clip indices so they lie within the volume bounds.
-      x_idx = np.clip(x_idx, 0, nX - 1)
-      y_idx = np.clip(y_idx, 0, nY - 1)
-      z_idx = np.clip(z_idx, 0, nZ - 1)
+      # Create mask for valid indices
+      valid_mask = (
+          (x_idx >= 0) & (x_idx < nX) &
+          (y_idx >= 0) & (y_idx < nY) &
+          (z_idx >= 0) & (z_idx < nZ)
+      )
 
-      # Sample the volume using nearest-neighbor interpolation.
+      # Clip indices for safe array access
+      x_idx_safe = np.clip(x_idx, 0, nX - 1)
+      y_idx_safe = np.clip(y_idx, 0, nY - 1)
+      z_idx_safe = np.clip(z_idx, 0, nZ - 1)
+
+      # Sample the volume
       if channels == 1:
-        slice_img = volume[z_idx, y_idx, x_idx]
+          slice_img = volume[z_idx_safe, y_idx_safe, x_idx_safe]
+          slice_img = np.where(valid_mask, slice_img, 0)
       else:
-        slice_img = volume[z_idx, y_idx, x_idx, :]
+          slice_img = volume[z_idx_safe, y_idx_safe, x_idx_safe, :]
+          slice_img = np.where(valid_mask[..., np.newaxis], slice_img, 0)
 
       # Normalize to uint8 if needed.
       if slice_img.dtype != np.uint8:
@@ -396,7 +468,7 @@
     async def on_file_upload(e):
       """
       When a file is uploaded, load it and update the volume.
-      Supports NPZ, NPY, and DICOM files.
+      Supports NPZ, NPY, NRRD, and DICOM files.
       """
       file_list = e.target.files
       if file_list.length == 0:
@@ -451,8 +523,42 @@
               volume_dims = (nZ, nY, nX)
               file_type = "NPY"
 
+          elif file_ext == 'nrrd':
+              # Handle NRRD files
+              bytes_data = await get_bytes_from_file(first_file)
+
+              # Write bytes to a temporary file since nrrd.read() requires a file path
+              temp_file = tempfile.NamedTemporaryFile(
+                  suffix='.nrrd', delete=False
+              )
+              temp_path = temp_file.name
+              temp_file.write(bytes_data)
+              temp_file.close()
+
+              try:
+                  data, header = nrrd.read(temp_path)
+
+                  # Rotate clockwise 90 degrees
+                  data = np.rot90(data, k=-1, axes=(0, 2))
+
+                  data = np.flip(data, axis=2)
+
+                  # Stretch width (columns) to double
+                  from scipy import ndimage
+                  nZ, nY, nX = data.shape
+                  zoom_factors = (1, 1, 2)
+                  data = ndimage.zoom(data, zoom_factors, order=1)
+
+                  volume = data
+                  nZ, nY, nX = volume.shape
+                  volume_dims = (nZ, nY, nX)
+                  file_type = "NRRD"
+              finally:
+                  # Clean up temp file
+                  os.unlink(temp_path)
+
           elif file_ext == 'dcm':
-              # Handle DICOM files - convert to proper file-like object first
+              # Handle DICOM files
               bytes_data = await get_bytes_from_file(first_file)
               dcm = pydicom.dcmread(BytesIO(bytes_data))
               volume = dcm.pixel_array
@@ -611,10 +717,15 @@
             const deltaX = event.clientX - previousMouseX;
             const deltaY = event.clientY - previousMouseY;
 
+            // Get global sensitivity multiplier
+            const globalSensitivity = parseFloat(
+                document.getElementById("global-sensitivity").value
+            );
+
             // Convert deltas to spherical coordinate changes
-            const sensitivity = 0.01; // Adjust as needed
-            let thetaChange = -deltaX * sensitivity; // REVERSED X DIRECTION
-            let phiChange = deltaY * sensitivity;
+            const baseSensitivity = 0.01; // Base sensitivity
+            let thetaChange = -deltaX * baseSensitivity * globalSensitivity;
+            let phiChange = deltaY * baseSensitivity * globalSensitivity;
 
             // Get current spherical coordinates
             let currentX = prism.position.x;
@@ -712,8 +823,14 @@
 
             infoDiv.innerHTML = `Position: (${x}, ${y}, ${z})<br>Angle: (Theta: ${theta}, Phi: ${phi})<br>Z Rotation: ${rotationDegrees}`;
 
+            // Get global sensitivity multiplier
+            const globalSensitivity = parseFloat(
+                document.getElementById("global-sensitivity").value
+            );
+
             // Process all active keys
-            const rotationSpeed = 0.05;
+            const baseRotationSpeed = 0.05; // Base rotation speed
+            const rotationSpeed = baseRotationSpeed * globalSensitivity;
 
             // Handle rotation (a and d keys)
             if (keys.a) {
@@ -744,16 +861,17 @@
             var currentY = parseInt(document.getElementById("y-slider").value);
             var baseY = max_y_halved; // This is your "original" y position
 
+            const baseUpSpeed = 10; // Base up speed
+            const upSpeed = baseUpSpeed * globalSensitivity;
+
             if (keys.w) {
                 // Move up with acceleration (faster the longer you hold)
-                var upSpeed = 10;
                 var newY = Math.min(currentY + upSpeed, max_y_halved + 60); // Cap at max_y_halved + 60
                 document.getElementById("y-slider").value = newY;
                 document.getElementById("y-value").innerText = newY;
             } else if (keys.s) {
                 // Move down
-                var downSpeed = 10;
-                var newY = Math.max(currentY - downSpeed, max_y_halved - 60);
+                var newY = Math.max(currentY - upSpeed, max_y_halved - 60);
                 document.getElementById("y-slider").value = newY;
                 document.getElementById("y-value").innerText = newY;
             }
@@ -774,6 +892,12 @@
         }
 
         window.volume_dims = [0, 0, 0];
+
+        // Update global sensitivity display value
+        document.getElementById("global-sensitivity").addEventListener("input", (e) => {
+            const value = parseFloat(e.target.value);
+            document.getElementById("global-sensitivity-value").innerText = value.toFixed(2) + "x";
+        });
 
         // Begin checking for PyScript readiness.
         waitForPyscriptReady();
